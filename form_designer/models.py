@@ -1,3 +1,5 @@
+import sys
+
 from django import forms
 from django.conf import settings
 from django.core.mail import send_mail
@@ -11,7 +13,34 @@ from django.utils.functional import curry
 from django.utils.translation import ugettext_lazy as _
 
 from form_designer.utils import JSONFieldDescriptor
+from django.core.exceptions import ImproperlyConfigured
 
+# Parse the form classes specified in the settings, which specify which classes
+# the form should inherit from
+if hasattr(settings, 'FORM_DESIGNER_CLASSES'):
+    FORM_CLASSES = ()
+    form_subclassed = False
+    for form_class in settings.FORM_DESIGNER_CLASSES:
+        if isinstance(form_class, type):
+            FORM_CLASSES += (form_class,)
+        elif isinstance(form_class, basestring):
+            # If we catch any errors here, the resulting error messages will
+            # be unhelpful for debugging, so we'll just let them occur
+            module, klass = form_class.rsplit('.', 1)
+            __import__(module)
+            FORM_CLASSES += (getattr(sys.modules[module], klass),)
+        else:
+            raise ImproperlyConfigured('FORM_DESIGNER_CLASSES must be a tuple of either classes or class import path strings.')
+        # Check if any of the classes parsed so far inherit from Form
+        form_subclassed = form_subclassed or isinstance(FORM_CLASSES[-1], forms.Form)
+    if not form_subclassed:
+        # If none of the specified classes inherit from Form, apped it to the
+        # list of classes to inherit from
+        FORM_CLASSES += (forms.Form,)
+else:
+    FORM_CLASSES = (forms.Form,)
+
+FORM_TAKES_REQUEST = getattr(settings, 'FORM_DESIGNER_PASS_REQUEST', False)
 
 class Form(models.Model):
     CONFIG_OPTIONS = [
@@ -41,7 +70,7 @@ class Form(models.Model):
         for field in self.fields.all():
             field.add_formfield(fields, self)
 
-        return type('Form%s' % self.pk, (forms.Form,), fields)
+        return type('Form%s' % self.pk, FORM_CLASSES, fields)
 
     def process(self, form, request):
         submission = FormSubmission.objects.create(
@@ -195,7 +224,10 @@ class FormContent(models.Model):
         return render_to_string(self.template, context)
         
     def render(self, request, **kwargs):
-        form_class = self.form.form()
+        if FORM_TAKES_REQUEST:
+            form_class = lambda *args, **kwargs: self.form.form()(request, *args, **kwargs)
+        else:
+            form_class = self.form.form()
         prefix = 'fc%d' % self.id
 
         if request.method == 'POST':
