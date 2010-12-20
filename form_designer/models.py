@@ -41,6 +41,7 @@ else:
     FORM_CLASSES = (forms.Form,)
 
 FORM_TAKES_REQUEST = getattr(settings, 'FORM_DESIGNER_PASS_REQUEST', False)
+HIDDEN_FIELDS = getattr(settings, 'FORM_DESIGNER_HIDDEN_FIELDS', [])
 
 class Form(models.Model):
     CONFIG_OPTIONS = [
@@ -189,10 +190,11 @@ class FormSubmission(models.Model):
     def formatted_data(self, html=False):
         formatted = ""
         for key, value in self.sorted_data().items():
-            if html:
-                formatted += "<dt>%s</dt><dd>%s</dd>\n" % (key, value)
-            else:
-                formatted += "%s: %s\n" % (key, value)
+            if key not in HIDDEN_FIELDS:
+                if html:
+                    formatted += "<dt>%s</dt><dd>%s</dd>\n" % (key, value)
+                else:
+                    formatted += "%s: %s\n" % (key, value)
         return formatted if not html else "<dl>%s</dl>" % formatted
 
     def formatted_data_html(self):
